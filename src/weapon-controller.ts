@@ -83,11 +83,11 @@ export class WeaponController {
     return Math.min(1, 1 - this.phase.remaining / this.weapon.fireInterval);
   }
 
-  /** 0..1 progress of the running reload (belt) or of the shell being inserted (shotgun); null when not reloading. */
+  /** 0..1 progress of the running reload (belt, magazine) or of the shell being inserted (shotgun); null when not reloading. */
   get reloadProgress(): number | null {
     if (this.phase.kind !== "reloading" || this.weapon.ammo.kind !== "magazine") return null;
     const reload = this.weapon.ammo.reload;
-    if (reload.kind === "belt") return Math.min(1, this.phase.elapsed / reload.duration);
+    if (reload.kind !== "shells") return Math.min(1, this.phase.elapsed / reload.duration);
     return Math.min(1, this.phase.elapsed / reload.perShell);
   }
 
@@ -149,8 +149,14 @@ export class WeaponController {
           kind: "counter",
           count,
           capacity: weapon.ammo.count,
-          hint: count > 0 ? "Click to throw — one per round" : "Used — back next round",
-          urgent: false,
+          hint: weapon.fireMode === "throw"
+            ? count > 0
+              ? "Click to throw — one per round"
+              : "Used — back next round"
+            : count > 0
+              ? "No reload — one load per round"
+              : "Empty — refilled next round",
+          urgent: weapon.fireMode !== "throw" && count === 0,
         };
     }
   }
@@ -276,7 +282,7 @@ export class WeaponController {
     if (this.weapon.ammo.kind !== "magazine") return;
     const reload = this.weapon.ammo.reload;
 
-    if (reload.kind === "belt") {
+    if (reload.kind !== "shells") {
       if (phase.elapsed >= reload.duration) {
         this.ammo[this.currentId] = this.capacity;
         this.finishReload();

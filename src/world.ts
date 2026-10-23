@@ -3,11 +3,10 @@ import {
   Color4,
   DirectionalLight,
   HemisphericLight,
-  Matrix,
   Mesh,
   MeshBuilder,
   ParticleSystem,
-  Scene,
+  type Scene,
   StandardMaterial,
   type Texture,
   TransformNode,
@@ -15,17 +14,16 @@ import {
   VertexBuffer,
 } from "./babylon";
 import { createRng, randomRange } from "./random";
+import { type Collapse, type FarmParts, SCENERIES, type SceneryId } from "./scenery";
+import { solidMaterial } from "./scenery/kit";
 
-const HORIZON = new Color3(0.8, 0.88, 0.93);
-const ZENITH = new Color3(0.24, 0.5, 0.86);
 const SKY_RADIUS = 700;
 const TERRAIN_CENTER_Z = 250;
 const CLOUD_WRAP_X = 520;
-
-// After the atomic bomb: dark, burnt and with a sickly green glow on the horizon.
-const FALLOUT_HORIZON = new Color3(0.16, 0.19, 0.08);
-const FALLOUT_ZENITH = new Color3(0.02, 0.02, 0.03);
 const CHARRED = new Color3(0.035, 0.03, 0.028);
+const SNOW_WHITE = new Color3(0.92, 0.94, 0.98);
+const WINDMILL_SPEED = 0.6;
+const WINDMILL_BOOST_SPEED = 9;
 
 interface DriftingCloud {
   mesh: Mesh;
@@ -38,116 +36,153 @@ interface MaterialState {
   emissive: Color3;
 }
 
-interface VertexColors {
+/** Terrain colour variants, swapped by the atmosphere (snow) and the atomic bomb (burnt). */
+export interface TerrainColors {
   mesh: Mesh;
   normal: number[];
   devastated: number[];
+  snow: number[];
 }
 
-/** Scene parts that change when the world is devastated. */
+export interface SkyDome {
+  mesh: Mesh;
+  /** 0 at the horizon … 1 at the zenith, one value per vertex — the atmosphere colours the gradient. */
+  heights: number[];
+}
+
+/** Collapsing structure with the pose it had before the blast. */
+interface CollapseState extends Collapse {
+  restTilt: number;
+  restScale: number;
+}
+
+/** Shared sky, light and clouds plus the currently built scenery. */
 export interface World {
-  windmillRotor: TransformNode;
+  scenery: SceneryId;
+  /** Parent of everything the scenery built; disposed when the scenery changes. */
+  sceneryRoot: TransformNode;
   clouds: DriftingCloud[];
   devastated: boolean;
   materials: MaterialState[];
   cloudMaterial: StandardMaterial;
-  vertexColors: VertexColors[];
-  /** Destroyed outright (tree crowns, roof, hay, windmill blades). */
+  skyDome: SkyDome;
+  terrain: TerrainColors;
+  /** Destroyed outright (tree crowns, roofs, hay, windmill blades). */
   burnsAway: TransformNode[];
-  barn: TransformNode;
+  collapses: CollapseState[];
+  /** Barn and windmill — only the farm has them. */
+  farm: FarmParts | null;
+  /** Seconds the windmill keeps spinning fast after its easter egg was shot. */
+  windmillBoost: number;
   sky: HemisphericLight;
   sun: DirectionalLight;
   ash: ParticleSystem;
 }
 
-/** Height of the landscape at a world position. Flat near the camera, hills further out, mountains at the back. */
+let activeHeight: (x: number, z: number) => number = SCENERIES.farm.height;
+
+/** Height of the landscape of the current scenery at a world position. */
 export function terrainHeight(x: number, z: number): number {
-  const ramp = Math.min(1, Math.max(0, z - 15) / 120);
-  const hills =
-    Math.sin(x * 0.035) * Math.cos(z * 0.03) * 5 +
-    Math.sin(x * 0.013 + z * 0.01 + 1.3) * 7 +
-    Math.cos(x * 0.07 + z * 0.05) * 1.5;
-  let height = (hills + 6) * ramp;
-  if (z > 260) {
-    height += (z - 260) * 0.38 * (0.6 + 0.4 * Math.sin(x * 0.02 + 2));
-  }
-  return height + Math.sin(x * 0.2) * Math.cos(z * 0.25) * 0.3;
+  return activeHeight(x, z);
 }
 
-export function createWorld(scene: Scene, particleTexture: Texture): World {
-  const rng = createRng(7);
+export function createWorld(scene: Scene, particleTexture: Texture, scenery: SceneryId): World {
   const lights = createLights(scene);
-  const materials: MaterialState[] = [];
-  const burnsAway: TransformNode[] = [];
-  const material = (name: string, color: Color3): StandardMaterial => {
-    const created = solidMaterial(scene, name, color);
-    materials.push({ material: created, diffuse: color.clone(), emissive: created.emissiveColor.clone() });
-    return created;
-  };
-
-  const sky = createSky(scene);
-  const terrain = createTerrain(scene);
-  createTrees(scene, rng, material, burnsAway);
-  const barn = createBarn(scene, material, burnsAway);
-  const windmillRotor = createWindmill(scene, material, burnsAway);
-  createFence(scene, material);
-  createHayBales(scene, material, burnsAway);
-  const { clouds, cloudMaterial } = createClouds(scene, rng);
-
+  const { clouds, cloudMaterial } = createClouds(scene, createRng(7));
   const world: World = {
-    windmillRotor,
+    scenery,
+    sceneryRoot: new TransformNode("scenery", scene),
     clouds,
     devastated: false,
-    materials,
+    materials: [],
     cloudMaterial,
-    vertexColors: [sky, terrain],
-    burnsAway,
-    barn,
+    skyDome: createSky(scene),
+    terrain: { mesh: new Mesh("terrainPlaceholder", scene), normal: [], devastated: [], snow: [] },
+    burnsAway: [],
+    collapses: [],
+    farm: null,
+    windmillBoost: 0,
     sky: lights.sky,
     sun: lights.sun,
     ash: createAsh(scene, particleTexture),
   };
-  setDevastated(world, scene, false);
+  buildScenery(scene, world, scenery);
   return world;
 }
 
+/** Tears down the current scenery and builds `scenery` in its place. */
+export function setScenery(world: World, scenery: SceneryId): void {
+  if (world.scenery === scenery) return;
+  const scene = world.sceneryRoot.getScene();
+  world.sceneryRoot.dispose(false, true);
+  world.sceneryRoot = new TransformNode("scenery", scene);
+  world.scenery = scenery;
+  buildScenery(scene, world, scenery);
+}
+
+function buildScenery(scene: Scene, world: World, id: SceneryId): void {
+  const definition = SCENERIES[id];
+  activeHeight = definition.height;
+  const materials: MaterialState[] = [];
+  const burnsAway: TransformNode[] = [];
+  const collapses: Collapse[] = [];
+  const farm = definition.build({
+    scene,
+    root: world.sceneryRoot,
+    rng: createRng(11),
+    material: (name, color) => {
+      const created = solidMaterial(scene, name, color);
+      materials.push({ material: created, diffuse: color.clone(), emissive: created.emissiveColor.clone() });
+      return created;
+    },
+    burnsAway,
+    collapses,
+    height: definition.height,
+  });
+  // Materials can be tuned after creation (textures, glow): remember their final state.
+  for (const state of materials) {
+    state.diffuse = state.material.diffuseColor.clone();
+    state.emissive = state.material.emissiveColor.clone();
+  }
+  world.terrain.mesh.dispose(false, true);
+  world.terrain = createTerrain(scene, definition.height, definition.color);
+  world.materials = materials;
+  world.burnsAway = burnsAway;
+  world.collapses = collapses.map((collapse) => ({ ...collapse, restTilt: collapse.node.rotation.z, restScale: collapse.node.scaling.y }));
+  world.farm = farm;
+  setDevastated(world, false);
+}
+
 export function updateWorld(world: World, dt: number): void {
-  if (!world.devastated) world.windmillRotor.rotation.z += dt * 0.6;
+  world.windmillBoost = Math.max(0, world.windmillBoost - dt);
+  const speed = world.windmillBoost > 0 ? WINDMILL_BOOST_SPEED * Math.min(1, world.windmillBoost) : WINDMILL_SPEED;
+  if (world.farm && !world.devastated) world.farm.windmillRotor.rotation.z += dt * Math.max(WINDMILL_SPEED, speed);
   for (const cloud of world.clouds) {
     cloud.mesh.position.x += cloud.speed * dt * (world.devastated ? 0.3 : 1);
     if (cloud.mesh.position.x > CLOUD_WRAP_X) cloud.mesh.position.x = -CLOUD_WRAP_X;
   }
 }
 
-/** Switches between the intact countryside and the burnt, irradiated wasteland after the atomic bomb. */
-export function setDevastated(world: World, scene: Scene, devastated: boolean): void {
+/**
+ * Switches the structures between the intact countryside and the burnt wasteland after the atomic bomb.
+ * Sky, light, fog and terrain colours are handled by the atmosphere.
+ */
+export function setDevastated(world: World, devastated: boolean): void {
   world.devastated = devastated;
-  const horizon = devastated ? FALLOUT_HORIZON : HORIZON;
-  scene.clearColor = new Color4(horizon.r, horizon.g, horizon.b, 1);
-  scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = devastated ? 0.006 : 0.0025;
-  scene.fogColor = horizon.clone();
-
-  world.sky.intensity = devastated ? 0.35 : 0.75;
-  world.sky.groundColor = devastated ? new Color3(0.2, 0.1, 0.05) : new Color3(0.35, 0.4, 0.3);
-  world.sun.intensity = devastated ? 0.35 : 0.9;
-  world.sun.diffuse = devastated ? new Color3(0.9, 0.45, 0.25) : new Color3(1, 0.95, 0.85);
-
   for (const state of world.materials) {
     state.material.diffuseColor = devastated ? Color3.Lerp(state.diffuse, CHARRED, 0.9) : state.diffuse.clone();
     state.material.emissiveColor = devastated ? Color3.Black() : state.emissive.clone();
-  }
-  world.cloudMaterial.diffuseColor = devastated ? new Color3(0.12, 0.11, 0.1) : Color3.White();
-  world.cloudMaterial.emissiveColor = devastated ? new Color3(0.06, 0.07, 0.03) : new Color3(0.72, 0.74, 0.78);
-
-  for (const colors of world.vertexColors) {
-    colors.mesh.setVerticesData(VertexBuffer.ColorKind, devastated ? colors.devastated : colors.normal);
+    // Textured facades go dark too: their windows no longer glow.
+    if (state.material.emissiveTexture) state.material.emissiveTexture.level = devastated ? 0 : 1;
+    if (state.material.diffuseTexture) state.material.diffuseTexture.level = devastated ? 0.12 : 1;
   }
   for (const node of world.burnsAway) node.setEnabled(!devastated);
-
-  // The barn is left as a sagging, blackened ruin.
-  world.barn.rotation.z = devastated ? 0.22 : 0;
-  world.barn.scaling.y = devastated ? 0.55 : 1;
+  for (const collapse of world.collapses) {
+    collapse.node.rotation.z = collapse.restTilt + (devastated ? collapse.tilt : 0);
+    collapse.node.scaling.y = collapse.restScale * (devastated ? collapse.squash : 1);
+  }
+  if (world.farm) world.farm.barnDoor.hinge.rotation.y = 0;
+  world.windmillBoost = 0;
 
   if (devastated) {
     world.ash.start();
@@ -157,15 +192,6 @@ export function setDevastated(world: World, scene: Scene, devastated: boolean): 
   }
 }
 
-function solidMaterial(scene: Scene, name: string, color: Color3): StandardMaterial {
-  const material = new StandardMaterial(name, scene);
-  material.diffuseColor = color.clone();
-  material.specularColor = Color3.Black();
-  return material;
-}
-
-type MaterialFactory = (name: string, color: Color3) => StandardMaterial;
-
 function createLights(scene: Scene): { sky: HemisphericLight; sun: DirectionalLight } {
   const sky = new HemisphericLight("skyLight", new Vector3(0, 1, 0), scene);
   sky.diffuse = new Color3(1, 0.98, 0.94);
@@ -173,21 +199,16 @@ function createLights(scene: Scene): { sky: HemisphericLight; sun: DirectionalLi
   return { sky, sun };
 }
 
-function createSky(scene: Scene): VertexColors {
+function createSky(scene: Scene): SkyDome {
   const sky = MeshBuilder.CreateSphere(
     "sky",
     { diameter: SKY_RADIUS * 2, segments: 32, sideOrientation: Mesh.BACKSIDE },
     scene,
   );
   const positions = sky.getVerticesData(VertexBuffer.PositionKind) ?? [];
-  const normal: number[] = [];
-  const devastated: number[] = [];
+  const heights: number[] = [];
   for (let i = 0; i < positions.length; i += 3) {
-    const t = Math.pow(Math.min(1, Math.max(0, positions[i + 1] / SKY_RADIUS / 0.6)), 0.7);
-    const day = Color3.Lerp(HORIZON, ZENITH, t);
-    const fallout = Color3.Lerp(FALLOUT_HORIZON, FALLOUT_ZENITH, Math.pow(t, 0.5));
-    normal.push(day.r, day.g, day.b, 1);
-    devastated.push(fallout.r, fallout.g, fallout.b, 1);
+    heights.push(Math.min(1, Math.max(0, positions[i + 1] / SKY_RADIUS / 0.6)));
   }
 
   const material = new StandardMaterial("skyMaterial", scene);
@@ -198,23 +219,7 @@ function createSky(scene: Scene): VertexColors {
   sky.applyFog = false;
   sky.infiniteDistance = true;
   sky.isPickable = false;
-  return { mesh: sky, normal, devastated };
-}
-
-function terrainColor(x: number, y: number, z: number): Color3 {
-  const grass = new Color3(0.38, 0.63, 0.25);
-  const darkGrass = new Color3(0.24, 0.47, 0.18);
-  const wheat = new Color3(0.8, 0.7, 0.34);
-  const rock = new Color3(0.5, 0.52, 0.56);
-  const snow = new Color3(0.95, 0.96, 1);
-
-  let color = Color3.Lerp(grass, darkGrass, 0.5 + 0.5 * Math.sin(x * 0.09) * Math.cos(z * 0.07));
-  if (z > 40 && z < 220 && Math.sin(x * 0.05 + z * 0.012) > 0.75) {
-    color = Color3.Lerp(color, wheat, 0.85);
-  }
-  if (y > 30) color = Color3.Lerp(color, rock, Math.min(1, (y - 30) / 20));
-  if (y > 75) color = Color3.Lerp(color, snow, Math.min(1, (y - 75) / 10));
-  return color;
+  return { mesh: sky, heights };
 }
 
 function burntTerrainColor(x: number, y: number, z: number): Color3 {
@@ -230,211 +235,45 @@ function burntTerrainColor(x: number, y: number, z: number): Color3 {
   return color;
 }
 
-function createTerrain(scene: Scene): VertexColors {
-  const terrain = MeshBuilder.CreateGround(
-    "terrain",
-    { width: 900, height: 620, subdivisions: 180, updatable: true },
-    scene,
-  );
+function createTerrain(
+  scene: Scene,
+  height: (x: number, z: number) => number,
+  color: (x: number, y: number, z: number) => Color3,
+): TerrainColors {
+  const terrain = MeshBuilder.CreateGround("terrain", { width: 900, height: 620, subdivisions: 180, updatable: true }, scene);
   terrain.position.z = TERRAIN_CENTER_Z;
   terrain.updateMeshPositions((positions) => {
     for (let i = 0; i < positions.length; i += 3) {
-      positions[i + 1] = terrainHeight(positions[i], positions[i + 2] + TERRAIN_CENTER_Z);
+      positions[i + 1] = height(positions[i], positions[i + 2] + TERRAIN_CENTER_Z);
     }
   }, true);
 
   const positions = terrain.getVerticesData(VertexBuffer.PositionKind) ?? [];
   const normal: number[] = [];
   const devastated: number[] = [];
+  const snow: number[] = [];
   for (let i = 0; i < positions.length; i += 3) {
     const x = positions[i];
     const y = positions[i + 1];
     const z = positions[i + 2] + TERRAIN_CENTER_Z;
-    const day = terrainColor(x, y, z);
+    const day = color(x, y, z);
     const burnt = burntTerrainColor(x, y, z);
+    const snowy = Color3.Lerp(day, SNOW_WHITE, 0.78 + 0.12 * Math.sin(x * 0.3) * Math.cos(z * 0.2));
     normal.push(day.r, day.g, day.b, 1);
     devastated.push(burnt.r, burnt.g, burnt.b, 1);
+    snow.push(snowy.r, snowy.g, snowy.b, 1);
   }
   terrain.setVerticesData(VertexBuffer.ColorKind, normal, true);
   // The terrain keeps a white base colour: it is tinted through vertex colours, not the material.
   terrain.material = solidMaterial(scene, "terrainMaterial", Color3.White());
   terrain.isPickable = false;
-  return { mesh: terrain, normal, devastated };
-}
-
-/** Creates a low-poly mesh whose origin sits at its base, so instances can be placed directly on the terrain. */
-function baseAnchored(mesh: Mesh, offsetY: number, material: StandardMaterial): Mesh {
-  mesh.bakeTransformIntoVertices(Matrix.Translation(0, offsetY, 0));
-  mesh.convertToFlatShadedMesh();
-  mesh.material = material;
-  mesh.isPickable = false;
-  return mesh;
-}
-
-function createTrees(scene: Scene, rng: () => number, material: MaterialFactory, burnsAway: TransformNode[]): void {
-  const trunk = baseAnchored(
-    MeshBuilder.CreateCylinder("trunk", { height: 2, diameterTop: 0.35, diameterBottom: 0.5, tessellation: 6 }, scene),
-    1,
-    material("trunk", new Color3(0.36, 0.24, 0.14)),
-  );
-  const pine = baseAnchored(
-    MeshBuilder.CreateCylinder("pine", { height: 5, diameterTop: 0, diameterBottom: 2.6, tessellation: 7 }, scene),
-    4.2,
-    material("pineMaterial", new Color3(0.13, 0.33, 0.17)),
-  );
-  const leaves = baseAnchored(
-    MeshBuilder.CreateSphere("leaves", { diameter: 3.4, segments: 3 }, scene),
-    3.6,
-    material("leavesMaterial", new Color3(0.27, 0.5, 0.2)),
-  );
-
-  const place = (source: Mesh, isFirst: boolean, position: Vector3, scale: number, rotationY: number): TransformNode => {
-    const node = isFirst ? source : source.createInstance(`${source.name}Instance`);
-    node.position.copyFrom(position);
-    node.scaling.setAll(scale);
-    node.rotation.y = rotationY;
-    node.isPickable = false;
-    return node;
-  };
-
-  let pinePlaced = false;
-  let leavesPlaced = false;
-  for (let i = 0; i < 260; i++) {
-    const z = randomRange(25, 290, rng);
-    const x = randomRange(-z * 1.4 - 20, z * 1.4 + 20, rng);
-    if (Math.abs(x + 30) < 12 && Math.abs(z - 70) < 12) continue; // keep the barn free
-    if (Math.abs(x - 45) < 8 && Math.abs(z - 120) < 8) continue; // keep the windmill free
-
-    const position = new Vector3(x, terrainHeight(x, z) - 0.2, z);
-    const scale = randomRange(0.8, 1.7, rng);
-    const rotationY = randomRange(0, Math.PI * 2, rng);
-    place(trunk, i === 0, position, scale, rotationY);
-    if (rng() < 0.55) {
-      burnsAway.push(place(pine, !pinePlaced, position, scale, rotationY));
-      pinePlaced = true;
-    } else {
-      burnsAway.push(place(leaves, !leavesPlaced, position, scale, rotationY));
-      leavesPlaced = true;
-    }
-  }
-}
-
-function createBarn(scene: Scene, material: MaterialFactory, burnsAway: TransformNode[]): TransformNode {
-  const barn = new TransformNode("barn", scene);
-  barn.position.set(-30, terrainHeight(-30, 70) - 0.3, 70);
-  barn.rotation.y = 0.4;
-
-  const body = MeshBuilder.CreateBox("barnBody", { width: 8, height: 5, depth: 10 }, scene);
-  body.material = material("barnRed", new Color3(0.62, 0.16, 0.12));
-  body.position.y = 2.5;
-
-  // A box turned by 45° whose lower half disappears inside the walls forms the gable roof.
-  const roof = MeshBuilder.CreateBox("barnRoof", { width: 6, height: 6, depth: 10 }, scene);
-  roof.material = material("barnRoofMaterial", new Color3(0.3, 0.22, 0.2));
-  roof.rotation.z = Math.PI / 4;
-  roof.position.y = 5;
-  burnsAway.push(roof);
-
-  const door = MeshBuilder.CreateBox("barnDoor", { width: 3.2, height: 3.6, depth: 0.2 }, scene);
-  door.material = material("barnDoorMaterial", new Color3(0.92, 0.9, 0.84));
-  door.position.set(0, 1.8, -5.05);
-
-  for (const mesh of [body, roof, door]) {
-    mesh.parent = barn;
-    mesh.isPickable = false;
-  }
-  return barn;
-}
-
-function createWindmill(scene: Scene, material: MaterialFactory, burnsAway: TransformNode[]): TransformNode {
-  const windmill = new TransformNode("windmill", scene);
-  windmill.position.set(45, terrainHeight(45, 120) - 0.5, 120);
-  windmill.rotation.y = -0.2;
-
-  const tower = MeshBuilder.CreateCylinder(
-    "windmillTower",
-    { height: 14, diameterTop: 3, diameterBottom: 5.5, tessellation: 8 },
-    scene,
-  );
-  tower.material = material("windmillTowerMaterial", new Color3(0.9, 0.86, 0.76));
-  tower.position.y = 7;
-
-  const cap = MeshBuilder.CreateCylinder("windmillCap", { height: 2.6, diameterTop: 0, diameterBottom: 4, tessellation: 8 }, scene);
-  cap.material = material("windmillCapMaterial", new Color3(0.35, 0.2, 0.15));
-  cap.position.y = 15.3;
-  burnsAway.push(cap);
-
-  const rotor = new TransformNode("windmillRotor", scene);
-  rotor.parent = windmill;
-  rotor.position.set(0, 14.2, -2.2);
-  burnsAway.push(rotor);
-
-  const bladeMaterial = material("windmillBladeMaterial", new Color3(0.55, 0.38, 0.24));
-  const hub = MeshBuilder.CreateSphere("windmillHub", { diameter: 0.9, segments: 8 }, scene);
-  hub.material = bladeMaterial;
-  hub.parent = rotor;
-  hub.isPickable = false;
-  for (let i = 0; i < 4; i++) {
-    const arm = new TransformNode(`windmillArm${i}`, scene);
-    arm.parent = rotor;
-    arm.rotation.z = (i * Math.PI) / 2;
-    const blade = MeshBuilder.CreateBox(`windmillBlade${i}`, { width: 1.5, height: 8, depth: 0.15 }, scene);
-    blade.material = bladeMaterial;
-    blade.parent = arm;
-    blade.position.set(0.5, 4.6, 0);
-    blade.isPickable = false;
-  }
-
-  for (const mesh of [tower, cap]) {
-    mesh.parent = windmill;
-    mesh.isPickable = false;
-  }
-  return rotor;
-}
-
-function createFence(scene: Scene, material: MaterialFactory): void {
-  const wood = material("fenceWood", new Color3(0.45, 0.31, 0.18));
-  const z = 10;
-  const post = MeshBuilder.CreateBox("fencePost", { width: 0.25, height: 1.4, depth: 0.25 }, scene);
-  post.material = wood;
-  post.isPickable = false;
-  post.position.set(-100, 0.7, z);
-  for (let x = -97; x <= 100; x += 3) {
-    const instance = post.createInstance("fencePostInstance");
-    instance.position.set(x, 0.7 + Math.sin(x) * 0.05, z);
-    instance.rotation.z = Math.sin(x * 1.7) * 0.04;
-    instance.isPickable = false;
-  }
-  for (const y of [0.5, 1.05]) {
-    const rail = MeshBuilder.CreateBox("fenceRail", { width: 200, height: 0.14, depth: 0.08 }, scene);
-    rail.material = wood;
-    rail.position.set(0, y, z - 0.16);
-    rail.isPickable = false;
-  }
-}
-
-function createHayBales(scene: Scene, material: MaterialFactory, burnsAway: TransformNode[]): void {
-  const hay = material("hay", new Color3(0.86, 0.73, 0.36));
-  const spots = [
-    new Vector3(-7, 0.9, 14),
-    new Vector3(8, 0.9, 16),
-    new Vector3(10.2, 0.9, 17.5),
-    new Vector3(9.1, 2.4, 16.8),
-  ];
-  spots.forEach((spot, index) => {
-    const bale = MeshBuilder.CreateCylinder(`hayBale${index}`, { diameter: 1.8, height: 1.4, tessellation: 16 }, scene);
-    bale.material = hay;
-    bale.rotation.z = Math.PI / 2;
-    bale.rotation.y = index * 0.7;
-    bale.position.copyFrom(spot);
-    bale.isPickable = false;
-    burnsAway.push(bale);
-  });
+  return { mesh: terrain, normal, devastated, snow };
 }
 
 function createClouds(scene: Scene, rng: () => number): { clouds: DriftingCloud[]; cloudMaterial: StandardMaterial } {
   const cloudMaterial = new StandardMaterial("cloudMaterial", scene);
   cloudMaterial.specularColor = Color3.Black();
+  cloudMaterial.diffuseColor = Color3.White();
 
   const clouds: DriftingCloud[] = [];
   for (let i = 0; i < 14; i++) {

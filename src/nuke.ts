@@ -8,15 +8,21 @@ import {
   type TransformNode,
   Vector3,
 } from "./babylon";
-import { NUKE_FLIGHT_TIME_S } from "./weapons";
+import { NUKE_FALL_TIME_S } from "./weapons";
 
 /** Scale of the mushroom model (about 3.5 units tall) in the world. */
 const MUSHROOM_SCALE = 34;
 const FIREBALL_RADIUS = 55;
 const SHOCKWAVE_RADIUS = 600;
+const SHOCKWAVE_DURATION_S = 3;
+/** Metres per second the visible shock wave travels; the game uses it to time the hit on the player. */
+export const SHOCKWAVE_SPEED = SHOCKWAVE_RADIUS / SHOCKWAVE_DURATION_S;
 /** Seconds after impact when the flash is brightest and the world is swapped for the wasteland. */
 const DEVASTATION_DELAY_S = 0.25;
-const BOMB_SCALE = 4;
+const BOMB_SCALE = 6;
+/** The bomb comes down from this high and from behind the target, so it falls into view. */
+const DROP_HEIGHT = 260;
+const DROP_LEAD = 60;
 
 export interface StrikeCallbacks {
   /** The bomb hit the ground. */
@@ -106,8 +112,13 @@ export class NuclearStrike {
     return this.strike !== null;
   }
 
-  launch(from: Vector3, target: Vector3, callbacks: StrikeCallbacks): void {
+  /** Drops the bomb out of the sky onto `target`; `viewer` is where the player stands. */
+  drop(target: Vector3, viewer: Vector3, callbacks: StrikeCallbacks): void {
     this.reset();
+    const awayFromViewer = target.subtract(viewer);
+    awayFromViewer.y = 0;
+    awayFromViewer.normalize();
+    const from = target.add(awayFromViewer.scale(DROP_LEAD)).addInPlaceFromFloats(0, DROP_HEIGHT, 0);
     const bomb = this.bombTemplate.instantiateHierarchy(null, { doNotInstantiate: true });
     bomb?.setEnabled(true);
     bomb?.scaling.scaleInPlace(BOMB_SCALE);
@@ -134,7 +145,7 @@ export class NuclearStrike {
       return;
     }
 
-    const t = strike.elapsed - NUKE_FLIGHT_TIME_S;
+    const t = strike.elapsed - NUKE_FALL_TIME_S;
     if (!strike.devastated && t >= DEVASTATION_DELAY_S) {
       strike.devastated = true;
       strike.callbacks.devastate(strike.target);
@@ -145,14 +156,14 @@ export class NuclearStrike {
   }
 
   private updateFlight(strike: Strike): void {
-    const t = Math.min(1, strike.elapsed / NUKE_FLIGHT_TIME_S);
-    const position = Vector3.Lerp(strike.from, strike.target, t);
-    const distance = Vector3.Distance(strike.from, strike.target);
-    position.y += Math.sin(Math.PI * t) * distance * 0.08;
+    const t = Math.min(1, strike.elapsed / NUKE_FALL_TIME_S);
+    // Speeds up while it falls, like a real free fall.
+    const position = Vector3.Lerp(strike.from, strike.target, t * t);
     if (strike.bomb) {
       strike.bomb.position.copyFrom(position);
       strike.bomb.rotationQuaternion = null;
-      strike.bomb.rotation.set(strike.elapsed * 3, strike.elapsed * 1.3, 0);
+      // Nose down, slowly spinning around its long axis.
+      strike.bomb.rotation.set(Math.PI / 2, strike.elapsed * 0.8, 0);
     }
     if (t < 1) return;
     strike.impacted = true;
@@ -174,13 +185,13 @@ export class NuclearStrike {
   }
 
   private updateShockwave(target: Vector3, t: number): void {
-    const visible = t < 3;
+    const visible = t < SHOCKWAVE_DURATION_S;
     this.shockwave.setEnabled(visible);
     if (!visible) return;
-    const radius = SHOCKWAVE_RADIUS * (t / 3);
+    const radius = SHOCKWAVE_RADIUS * (t / SHOCKWAVE_DURATION_S);
     this.shockwave.position.set(target.x, target.y + 2, target.z);
     this.shockwave.scaling.set(radius, 40, radius);
-    this.shockwaveMaterial.alpha = 0.8 * (1 - t / 3);
+    this.shockwaveMaterial.alpha = 0.8 * (1 - t / SHOCKWAVE_DURATION_S);
   }
 
   private updateMushroom(target: Vector3, t: number): void {

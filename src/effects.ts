@@ -253,6 +253,80 @@ export class Effects {
     });
   }
 
+  /**
+   * Rocket with a glowing motor and a smoke trail. Flies straight on until `strikes` reports a hit or
+   * `range` is reached, then calls `onExplode` with the position.
+   */
+  rocket(
+    from: Vector3,
+    direction: Vector3,
+    speed: number,
+    range: number,
+    strikes: (position: Vector3) => boolean,
+    onExplode: (position: Vector3) => void,
+  ): void {
+    const heading = direction.normalizeToNew();
+    const body = MeshBuilder.CreateCylinder("rocket", { height: 0.9, diameterTop: 0.2, diameterBottom: 0.1, tessellation: 8 }, this.scene);
+    const bodyMaterial = new StandardMaterial("rocketMaterial", this.scene);
+    bodyMaterial.diffuseColor = new Color3(0.24, 0.27, 0.12);
+    body.material = bodyMaterial;
+    body.isPickable = false;
+    body.rotationQuaternion = new Quaternion();
+    Quaternion.FromUnitVectorsToRef(Vector3.Up(), heading, body.rotationQuaternion);
+    const flame = MeshBuilder.CreateSphere("rocketFlame", { diameter: 0.7, segments: 6 }, this.scene);
+    flame.material = unlitMaterial(this.scene, "rocketFlameMaterial", new Color3(1, 0.7, 0.3));
+    flame.parent = body;
+    flame.position.y = -0.5;
+    flame.isPickable = false;
+
+    const trail = new ParticleSystem("rocketTrail", 400, this.scene);
+    trail.particleTexture = this.softTexture;
+    trail.emitter = body;
+    trail.color1 = new Color4(0.8, 0.78, 0.75, 0.9);
+    trail.color2 = new Color4(0.6, 0.58, 0.55, 0.85);
+    trail.colorDead = new Color4(0.55, 0.55, 0.55, 0);
+    trail.minSize = 1.2;
+    trail.maxSize = 2.6;
+    trail.minLifeTime = 1.2;
+    trail.maxLifeTime = 2.4;
+    trail.emitRate = 260;
+    trail.direction1 = new Vector3(-0.3, 0.2, -0.3);
+    trail.direction2 = new Vector3(0.3, 0.6, 0.3);
+    trail.minEmitPower = 0.2;
+    trail.maxEmitPower = 0.8;
+    trail.addSizeGradient(0, 0.6);
+    trail.addSizeGradient(1, 2.2);
+    trail.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    trail.start();
+
+    let travelled = 0;
+    let exploded = false;
+    let afterglow = 0;
+    this.transients.push((dt) => {
+      if (exploded) {
+        // Let the trail drift away before it is removed.
+        afterglow += dt;
+        if (afterglow < 2) return true;
+        trail.dispose(false);
+        return false;
+      }
+      travelled = Math.min(range, travelled + speed * dt);
+      body.position.copyFrom(from).addInPlace(heading.scale(travelled));
+      flame.scaling.setAll(0.8 + Math.random() * 0.5);
+      if (travelled < range && !strikes(body.position)) return true;
+      exploded = true;
+      const position = body.position.clone();
+      trail.stop();
+      trail.emitter = position;
+      flame.material?.dispose();
+      flame.dispose();
+      bodyMaterial.dispose();
+      body.dispose();
+      onExplode(position);
+      return true;
+    });
+  }
+
   /** Small puff of smoke, e.g. from a chicken roasted by the laser. */
   smokePuff(position: Vector3): void {
     const puff = new ParticleSystem("smokePuff", 30, this.scene);

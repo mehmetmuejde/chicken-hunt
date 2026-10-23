@@ -70,6 +70,39 @@ body.is-playing #game {
   text-align: right;
 }
 
+.combo {
+  position: absolute;
+  top: 96px;
+  left: 16px;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.45);
+  color: var(--gold);
+}
+
+.combo-value {
+  font-size: 1.8rem;
+  font-weight: 900;
+}
+
+.combo-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.combo-fill {
+  --fill: 1;
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--gold) calc(var(--fill) * 100%), rgb(255 255 255 / 0.15) 0);
+}
+
 .hud-label {
   font-size: 0.75rem;
   letter-spacing: 0.12em;
@@ -243,6 +276,14 @@ body.is-playing .crosshair {
   animation: flash 120ms ease-out;
 }
 
+.cracks {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
 .nuke-flash {
   position: fixed;
   inset: 0;
@@ -255,10 +296,64 @@ body.is-playing .crosshair {
   animation: nuke-flash 3.5s ease-out;
 }
 
+.boss-bar {
+  position: fixed;
+  top: -10px;
+  left: -60px;
+  width: 120px;
+  height: 10px;
+  pointer-events: none;
+  border: 2px solid #1a0f08;
+  border-radius: 5px;
+  background: rgb(0 0 0 / 0.5);
+}
+
+.boss-fill {
+  --fill: 1;
+  display: block;
+  height: 100%;
+  width: calc(var(--fill) * 100%);
+  border-radius: 3px;
+  background: linear-gradient(#ff6b4a, var(--accent-dark));
+}
+
+.banner {
+  position: fixed;
+  top: 28%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  color: var(--gold);
+  font-size: clamp(2rem, 6vw, 4rem);
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
+  -webkit-text-stroke: 2px var(--wood-dark);
+}
+
+.banner.is-active {
+  animation: banner 2.2s ease-out forwards;
+}
+
 .popups {
   position: fixed;
   inset: 0;
   pointer-events: none;
+}
+
+.popup--bonus {
+  color: #ffe36e;
+  font-size: 2.2rem;
+}
+
+.popup--penalty {
+  color: #ff5a3c;
+}
+
+.popup--info {
+  color: #fff;
+  font-size: 1.3rem;
 }
 
 .popup {
@@ -279,6 +374,7 @@ body.is-playing .crosshair {
   display: grid;
   place-items: center;
   padding: 16px;
+  overflow-y: auto;
   background: rgb(20 30 20 / 0.25);
 }
 
@@ -317,6 +413,22 @@ body.is-playing .crosshair {
   font-size: 3rem;
   font-weight: 900;
   color: var(--accent-dark);
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.setting select {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 2px solid var(--wood);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
 }
 
 .setting {
@@ -392,6 +504,25 @@ body.is-playing .crosshair {
   }
   100% {
     opacity: 0;
+  }
+}
+
+@keyframes banner {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -60%) scale(1);
   }
 }
 

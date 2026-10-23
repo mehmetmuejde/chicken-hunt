@@ -27,6 +27,12 @@ const PUMP_TRAVEL = 0.08;
 const COVER_OPEN_ANGLE = 1.15;
 const FLAK_RECOIL_TRAVEL = 0.55;
 const FLAK_BREECH_DROP = 0.22;
+const SLIDE_TRAVEL = 0.025;
+const AK_BOLT_TRAVEL = 0.07;
+const MAG_DROP = 0.22;
+/** Barrel spin of the Gatling while firing (rad/s) and how fast it winds down. */
+const GATLING_SPIN = 22;
+const GATLING_SPIN_DECAY = 2.5;
 const DEBRIS_LIFETIME_S = 0.8;
 const DEBRIS_GRAVITY = -9;
 
@@ -51,17 +57,54 @@ interface WeaponVisual {
 const NO_POSE: Pose = { x: 0, y: 0, z: 0, pitch: 0, roll: 0 };
 
 const VISUALS: Record<WeaponId, WeaponVisual> = {
+  pistol: {
+    hold: new Vector3(0.1, -0.075, 0.32),
+    recoil: { back: 0.03, lift: 0.22 },
+    reloadPose: { x: -0.04, y: 0.04, z: 0, pitch: -0.25, roll: -0.35 },
+    flashSize: 0.1,
+  },
+  mp40: {
+    hold: new Vector3(0.17, -0.15, 0.36),
+    recoil: { back: 0.015, lift: 0.04 },
+    reloadPose: { x: -0.04, y: 0.02, z: 0, pitch: -0.15, roll: -0.5 },
+    flashSize: 0.13,
+  },
   shotgun: {
-    hold: new Vector3(0.2, -0.22, 0.3),
+    hold: new Vector3(0.18, -0.16, 0.38),
     recoil: { back: 0.07, lift: 0.16 },
     reloadPose: { x: -0.07, y: 0.08, z: 0, pitch: 0.02, roll: -0.9 },
     flashSize: 0.2,
   },
+  m1garand: {
+    hold: new Vector3(0.18, -0.16, 0.38),
+    recoil: { back: 0.05, lift: 0.14 },
+    reloadPose: { x: -0.05, y: 0.06, z: 0, pitch: 0.05, roll: -0.6 },
+    flashSize: 0.2,
+  },
+  ak47: {
+    hold: new Vector3(0.18, -0.16, 0.38),
+    recoil: { back: 0.02, lift: 0.05 },
+    reloadPose: { x: -0.04, y: 0.02, z: 0, pitch: -0.15, roll: -0.5 },
+    flashSize: 0.15,
+  },
   mg42: {
-    hold: new Vector3(0.2, -0.22, 0.3),
+    hold: new Vector3(0.18, -0.16, 0.38),
     recoil: { back: 0.018, lift: 0.03 },
     reloadPose: { x: -0.03, y: -0.02, z: 0, pitch: -0.12, roll: -0.2 },
     flashSize: 0.13,
+  },
+  gatling: {
+    hold: new Vector3(0.2, -0.18, 0.44),
+    scale: 0.6,
+    recoil: { back: 0.01, lift: 0.015 },
+    reloadPose: NO_POSE,
+    flashSize: 0.22,
+  },
+  rpg7: {
+    hold: new Vector3(0.16, -0.12, 0.3),
+    recoil: { back: 0.06, lift: 0.12 },
+    reloadPose: { x: -0.04, y: -0.06, z: 0, pitch: 0.3, roll: -0.25 },
+    flashSize: 0.4,
   },
   flak88: {
     hold: new Vector3(0.36, -0.4, 1.0),
@@ -71,14 +114,14 @@ const VISUALS: Record<WeaponId, WeaponVisual> = {
     flashSize: 2.2,
   },
   laser: {
-    hold: new Vector3(0.21, -0.21, 0.4),
+    hold: new Vector3(0.19, -0.15, 0.42),
     scale: 0.85,
     recoil: { back: 0, lift: 0 },
     reloadPose: NO_POSE,
     flashSize: 0,
   },
   nuke: {
-    hold: new Vector3(0.2, -0.2, 0.42),
+    hold: new Vector3(0.16, -0.16, 0.32),
     recoil: { back: 0, lift: 0 },
     reloadPose: NO_POSE,
     flashSize: 0,
@@ -174,6 +217,8 @@ export class Viewmodel {
   private reloadBlend = 0;
   private flashTimer = 0;
   private time = 0;
+  private gatlingSpin = 0;
+  private gatlingAngle = 0;
   private casingTemplate: Mesh | null = null;
 
   private constructor(
@@ -210,18 +255,23 @@ export class Viewmodel {
     return rig ? rig.muzzle.getAbsolutePosition().clone() : null;
   }
 
-  fire(weapon: WeaponDefinition): void {
+  /** `lastRound`: the shot emptied the weapon (the Garand throws out its clip). */
+  fire(weapon: WeaponDefinition, lastRound = false): void {
     const recoil = VISUALS[weapon.id].recoil;
     this.recoil.back += recoil.back;
     this.recoil.lift += recoil.lift * (weapon.fireMode === "auto" ? 0.6 + Math.random() * 0.8 : 1);
     this.recoil.roll += (Math.random() - 0.5) * recoil.lift * 0.5;
     this.flashTimer = weapon.id === "flak88" ? 0.08 : 0.05;
 
+    if (weapon.id === "gatling") this.gatlingSpin = GATLING_SPIN;
+
     const rig = this.rigs.get(weapon.id);
     if (!rig?.flash) return;
     rig.flash.rotation.z = Math.random() * Math.PI * 2;
     rig.flash.scaling.setAll(0.8 + Math.random() * 0.5);
-    if (weapon.fireMode === "auto") this.ejectCasing(rig);
+    // The shotgun ejects its shell during the pump stroke instead.
+    if (weapon.id !== "shotgun") this.ejectCasing(rig);
+    if (weapon.id === "m1garand" && lastRound) this.ejectClip(rig);
   }
 
   /** Spent shotgun shell flying out of the ejection port during the pump stroke. */
@@ -269,9 +319,28 @@ export class Viewmodel {
       this.recoil.roll + pose.roll,
     );
 
+    this.updateGatlingSpin(dt);
     switch (rig.definition.id) {
+      case "pistol":
+        this.animatePistol(rig, controller);
+        break;
       case "shotgun":
         this.animateShotgun(rig, controller);
+        break;
+      case "ak47":
+        this.animateAk47(rig, controller);
+        break;
+      case "mp40":
+        this.animateMp40(rig, controller);
+        break;
+      case "m1garand":
+        this.animateGarand(rig, controller);
+        break;
+      case "gatling":
+        this.animateGatling(rig);
+        break;
+      case "rpg7":
+        this.animateRpg(rig, controller);
         break;
       case "mg42":
         this.animateMg42(rig, controller);
@@ -293,14 +362,13 @@ export class Viewmodel {
     const b = this.reloadBlend;
     const pose: Pose = { x: reload.x * b, y: reload.y * b, z: reload.z * b, pitch: reload.pitch * b, roll: reload.roll * b };
     if (rig.definition.id === "nuke") {
-      // Wind up, then fling the bomb forward.
+      // The radio is raised to the face while the strike is called in.
       const p = controller.actionProgress;
       if (p !== null) {
-        const windUp = smoothstep(0, 0.25, p) * (1 - smoothstep(0.25, 0.4, p));
-        const fling = smoothstep(0.25, 0.4, p) * (1 - smoothstep(0.5, 1, p));
-        pose.z += -0.12 * windUp + 0.25 * fling;
-        pose.y += 0.1 * windUp + 0.12 * fling;
-        pose.pitch += -0.6 * windUp + 0.5 * fling;
+        const raise = Math.sin(Math.PI * p);
+        pose.y += 0.06 * raise;
+        pose.x -= 0.04 * raise;
+        pose.pitch -= 0.25 * raise;
       }
     }
     return pose;
@@ -327,7 +395,7 @@ export class Viewmodel {
     const glow: StandardMaterial[] = [];
     for (const mesh of result.meshes) this.prepareMesh(mesh, materials, glow);
 
-    const body = find("Body") ?? require("Bomb");
+    const body = require("Body");
     const muzzle = require("Muzzle");
 
     // Turn the model so its barrel points along the camera's forward axis.
@@ -443,6 +511,9 @@ export class Viewmodel {
       const progress = controller.pumpProgress;
       const travel = progress === null ? 0 : Math.sin(Math.PI * progress) * PUMP_TRAVEL;
       pump.position.copyFrom(this.restPosition(rig, pump)).addInPlace(rig.barrel.scale(-travel));
+      // The left hand holds the pump and rides along with it.
+      const hand = rig.find("HandLeft");
+      hand?.position.copyFrom(this.restPosition(rig, hand)).addInPlace(rig.barrel.scale(-travel));
     }
 
     const shell = rig.loadingShell;
@@ -454,6 +525,127 @@ export class Viewmodel {
     if (!inserting || progress === null) return;
     const start = port.position.add(new Vector3(0.04, -0.07, 0)).addInPlace(rig.barrel.scale(-0.04));
     Vector3.LerpToRef(start, port.position, smoothstep(0.1, 0.85, progress), shell.position);
+  }
+
+  /** Slide snaps back with every shot and locks open on an empty magazine until the reload releases it. */
+  private animatePistol(rig: WeaponRig, controller: WeaponController): void {
+    this.animateMagazine(rig, controller);
+    const slide = rig.find("Slide");
+    if (!slide) return;
+    const reload = controller.reloadProgress;
+    const lockedOpen = controller.currentAmmo === 0 && (reload === null || reload < 0.85);
+    const travel = lockedOpen ? 1 : this.cycleTravel(controller.actionProgress);
+    slide.position.copyFrom(this.restPosition(rig, slide)).addInPlace(rig.barrel.scale(-travel * SLIDE_TRAVEL));
+  }
+
+  /** Bolt handle cycles with every shot and is pulled once at the end of the reload. */
+  private animateAk47(rig: WeaponRig, controller: WeaponController): void {
+    this.animateMagazine(rig, controller);
+    const bolt = rig.find("Bolt");
+    if (!bolt) return;
+    const reload = controller.reloadProgress;
+    const charge = reload === null ? 0 : smoothstep(0.82, 0.9, reload) * (1 - smoothstep(0.92, 0.98, reload));
+    const travel = Math.max(charge, this.cycleTravel(controller.actionProgress));
+    bolt.position.copyFrom(this.restPosition(rig, bolt)).addInPlace(rig.barrel.scale(-travel * AK_BOLT_TRAVEL));
+  }
+
+  private animateMp40(rig: WeaponRig, controller: WeaponController): void {
+    this.animateMagazine(rig, controller);
+    const bolt = rig.find("Bolt");
+    if (!bolt) return;
+    const reload = controller.reloadProgress;
+    const charge = reload === null ? 0 : smoothstep(0.82, 0.9, reload) * (1 - smoothstep(0.92, 0.98, reload));
+    const travel = Math.max(charge, this.cycleTravel(controller.actionProgress));
+    bolt.position.copyFrom(this.restPosition(rig, bolt)).addInPlace(rig.barrel.scale(-travel * AK_BOLT_TRAVEL));
+  }
+
+  /**
+   * The operating rod cycles with every shot and stays back on an empty rifle. On reload a fresh clip is
+   * pushed down into the receiver from above, then the rod slams forward.
+   */
+  private animateGarand(rig: WeaponRig, controller: WeaponController): void {
+    const reload = controller.reloadProgress;
+    const empty = controller.currentAmmo === 0;
+    const rod = rig.find("OpRod");
+    if (rod) {
+      const lockedBack = empty && (reload === null || reload < 0.75);
+      const travel = lockedBack ? 1 : this.cycleTravel(controller.actionProgress);
+      rod.position.copyFrom(this.restPosition(rig, rod)).addInPlace(rig.barrel.scale(-travel * 0.07));
+    }
+    const clip = rig.find("Clip");
+    if (!clip) return;
+    clip.setEnabled(!empty || (reload !== null && reload > 0.25));
+    const drop = reload === null || !empty ? 0 : 1 - smoothstep(0.3, 0.65, reload);
+    clip.position.copyFrom(this.restPosition(rig, clip)).addInPlaceFromFloats(0, drop * 0.14, 0);
+    const hand = rig.find("HandLeft");
+    const reach = reload === null ? 0 : smoothstep(0.15, 0.3, reload) * (1 - smoothstep(0.65, 0.8, reload));
+    hand?.position.copyFrom(this.restPosition(rig, hand)).addInPlaceFromFloats(0, 0.07 * reach, -0.1 * reach);
+  }
+
+  /** The empty en-bloc clip flies up out of the Garand. */
+  private ejectClip(rig: WeaponRig): void {
+    const template = rig.find("Clip");
+    if (!template) return;
+    const clip = template.instantiateHierarchy(rig.root, { doNotInstantiate: true });
+    if (!clip) return;
+    clip.setEnabled(true);
+    clip.position.copyFrom(this.restPosition(rig, template));
+    this.addDebris(clip, new Vector3(0.4, 2.6, 0).addInPlace(rig.barrel.scale(-0.5)), new Vector3(9, 4, 6), 1.1);
+  }
+
+  /** 0..1 travel of a slide or bolt through one fire interval: fast back, slower forward. */
+  private cycleTravel(progress: number | null): number {
+    if (progress === null) return 0;
+    return progress < 0.2 ? progress / 0.2 : 1 - smoothstep(0.2, 0.7, progress);
+  }
+
+  /** The empty magazine drops out, a full one comes up from below. */
+  private animateMagazine(rig: WeaponRig, controller: WeaponController): void {
+    const mag = rig.find("Mag");
+    if (!mag) return;
+    const reload = controller.reloadProgress;
+    const drop = reload === null ? 0 : reload < 0.45 ? smoothstep(0.1, 0.35, reload) : 1 - smoothstep(0.5, 0.85, reload);
+    mag.setEnabled(drop < 0.98);
+    mag.position.copyFrom(this.restPosition(rig, mag)).addInPlaceFromFloats(0, -drop * MAG_DROP, 0);
+    // The support hand fetches the fresh magazine from below and pushes it in.
+    const hand = rig.find("HandLeft");
+    const reach = reload === null ? 0 : smoothstep(0.3, 0.45, reload) * (1 - smoothstep(0.5, 0.85, reload));
+    hand?.position.copyFrom(this.restPosition(rig, hand)).addInPlaceFromFloats(0, -reach * MAG_DROP, 0);
+  }
+
+  /** The rocket leaves with the shot; on reload a new one is pushed into the muzzle from the front. */
+  private animateRpg(rig: WeaponRig, controller: WeaponController): void {
+    const rocket = rig.find("Rocket");
+    if (!rocket) return;
+    const reload = controller.reloadProgress;
+    const loaded = controller.currentAmmo > 0;
+    rocket.setEnabled(loaded || (reload !== null && reload > 0.02));
+    // The recording has the rocket sliding in right at the start; the rest is cocking.
+    const insert = loaded || reload === null ? 0 : 1 - smoothstep(0.05, 0.16, reload);
+    const lift = loaded || reload === null ? 0 : 1 - smoothstep(0.02, 0.08, reload);
+    rocket.position
+      .copyFrom(this.restPosition(rig, rocket))
+      .addInPlace(rig.barrel.scale(insert * 0.3))
+      .addInPlaceFromFloats(0, -lift * 0.12, 0);
+  }
+
+  private updateGatlingSpin(dt: number): void {
+    this.gatlingSpin *= Math.exp(-dt * GATLING_SPIN_DECAY);
+    this.gatlingAngle = (this.gatlingAngle + this.gatlingSpin * dt) % (Math.PI * 2);
+  }
+
+  /** Barrel cluster spins while firing; the hand crank turns with it. */
+  private animateGatling(rig: WeaponRig): void {
+    const barrels = rig.find("Barrels");
+    if (barrels) {
+      const rest = rig.rest.get(barrels)?.rotation ?? Quaternion.Identity();
+      barrels.rotationQuaternion = rest.multiply(Quaternion.RotationAxis(rig.barrel, this.gatlingAngle));
+    }
+    const crank = rig.find("Crank");
+    if (crank) {
+      const rest = rig.rest.get(crank)?.rotation ?? Quaternion.Identity();
+      crank.rotationQuaternion = rest.multiply(Quaternion.RotationAxis(Vector3.Right(), this.gatlingAngle * 2));
+    }
   }
 
   private animateMg42(rig: WeaponRig, controller: WeaponController): void {
@@ -518,13 +710,14 @@ export class Viewmodel {
     }
   }
 
+  /** The radio's call button glows while the strike is still available. */
   private animateNuke(rig: WeaponRig, controller: WeaponController): void {
-    const bomb = rig.find("Bomb");
-    if (!bomb) return;
-    const progress = controller.actionProgress;
-    const holding = controller.currentAmmo > 0 || (progress !== null && progress < 0.33);
-    bomb.setEnabled(holding);
+    const blink = controller.currentAmmo > 0 && Math.sin(this.time * 6) > 0 ? 1 : 0.25;
+    for (const material of rig.glow) {
+      if (material.name.startsWith("GlowRed")) material.emissiveColor = new Color3(1, 0.12, 0.08).scale(blink);
+    }
   }
+
 
   private ejectCasing(rig: WeaponRig): void {
     const port = rig.find("EjectPort");
