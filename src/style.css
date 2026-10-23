@@ -1,0 +1,422 @@
+:root {
+  --ink: #2b1d12;
+  --paper: #f6ecd6;
+  --wood: #7a4a26;
+  --wood-dark: #4d2d16;
+  --accent: #d8401f;
+  --accent-dark: #a92d13;
+  --gold: #f2c14e;
+  color-scheme: light;
+  font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #cde0ec;
+  color: var(--ink);
+}
+
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  touch-action: none;
+  outline: none;
+}
+
+body.is-playing #game {
+  cursor: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* HUD */
+
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hud-box {
+  position: absolute;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: 8px 16px;
+  background: linear-gradient(var(--wood), var(--wood-dark));
+  border: 3px solid var(--wood-dark);
+  border-radius: 10px;
+  box-shadow: 0 4px 0 rgb(0 0 0 / 0.25);
+  color: var(--paper);
+}
+
+.hud-score {
+  left: 16px;
+}
+
+.hud-time {
+  right: 16px;
+  text-align: right;
+}
+
+.hud-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.hud-value {
+  font-size: 2rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.hud-value.is-low {
+  color: var(--gold);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.hud-ammo {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.ammo {
+  display: flex;
+  gap: 6px;
+}
+
+.shell {
+  width: 14px;
+  height: 40px;
+  border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(to bottom, var(--accent) 0 68%, #c9a227 68% 100%);
+  box-shadow: inset -3px 0 0 rgb(0 0 0 / 0.2), 0 2px 0 rgb(0 0 0 / 0.3);
+  transition: opacity 120ms, transform 120ms;
+}
+
+.shell.is-spent {
+  opacity: 0.18;
+  transform: translateY(4px);
+}
+
+.ammo-count {
+  color: #fff;
+  font-size: 1.8rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 0 rgb(0 0 0 / 0.5);
+}
+
+.ammo-bar {
+  --fill: 1;
+  width: 180px;
+  height: 14px;
+  border: 2px solid var(--wood-dark);
+  border-radius: 7px;
+  background:
+    linear-gradient(to right, #d9a93a calc(var(--fill) * 100%), transparent 0),
+    rgb(0 0 0 / 0.45);
+}
+
+.weapons {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  gap: 8px;
+}
+
+.weapon {
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.45);
+  color: rgb(255 255 255 / 0.7);
+  font-size: 0.95rem;
+}
+
+.weapon.is-active {
+  background: linear-gradient(var(--wood), var(--wood-dark));
+  color: var(--paper);
+  font-weight: 800;
+}
+
+.weapon kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.2);
+  font: inherit;
+  text-align: center;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.reload-hint {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.45);
+  color: #fff;
+  font-size: 0.85rem;
+}
+
+.reload-hint.is-urgent {
+  background: var(--accent);
+  animation: pulse 0.6s ease-in-out infinite;
+}
+
+/* Crosshair, muzzle flash, score popups */
+
+.crosshair {
+  position: fixed;
+  top: -22px;
+  left: -22px;
+  width: 44px;
+  height: 44px;
+  pointer-events: none;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px rgb(0 0 0 / 0.6), inset 0 0 0 1.5px rgb(0 0 0 / 0.6);
+  display: none;
+}
+
+.crosshair::before,
+.crosshair::after {
+  content: "";
+  position: absolute;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+}
+
+.crosshair::before {
+  left: 50%;
+  top: -10px;
+  bottom: -10px;
+  width: 2px;
+  transform: translateX(-50%);
+}
+
+.crosshair::after {
+  top: 50%;
+  left: -10px;
+  right: -10px;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+body.is-playing .crosshair {
+  display: block;
+}
+
+.flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at var(--x) var(--y), rgb(255 250 220 / 0.9) 0, rgb(255 220 150 / 0.25) 60px, transparent 160px);
+}
+
+.flash.is-active {
+  animation: flash 120ms ease-out;
+}
+
+.nuke-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle, #fff 0%, #fff8e0 40%, #ffd28a 100%);
+}
+
+.nuke-flash.is-active {
+  animation: nuke-flash 3.5s ease-out;
+}
+
+.popups {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.popup {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  color: var(--gold);
+  font-size: 1.8rem;
+  font-weight: 900;
+  -webkit-text-stroke: 1.5px var(--wood-dark);
+  animation: rise 900ms ease-out forwards;
+}
+
+/* Start and end screens */
+
+.screen {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(20 30 20 / 0.25);
+}
+
+.panel {
+  width: min(460px, 100%);
+  padding: 28px 32px;
+  background: var(--paper);
+  border: 4px solid var(--wood);
+  border-radius: 16px;
+  box-shadow: 0 10px 0 var(--wood-dark), 0 20px 40px rgb(0 0 0 / 0.3);
+  text-align: center;
+}
+
+.panel h1,
+.panel h2 {
+  margin: 0 0 8px;
+  color: var(--accent-dark);
+  font-size: 2.6rem;
+  line-height: 1.1;
+}
+
+.rules {
+  margin: 16px 0 24px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.final {
+  margin: 8px 0;
+  font-size: 1.6rem;
+}
+
+.final span {
+  font-size: 3rem;
+  font-weight: 900;
+  color: var(--accent-dark);
+}
+
+.setting {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 20px;
+}
+
+.setting input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.new-best {
+  margin: 0;
+  color: var(--wood);
+  font-weight: 800;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.best {
+  margin: 16px 0 0;
+  opacity: 0.75;
+}
+
+.button {
+  min-height: 48px;
+  padding: 12px 28px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 1.15rem;
+  font-weight: 800;
+  box-shadow: 0 5px 0 var(--accent-dark);
+  cursor: pointer;
+  transition: transform 80ms, box-shadow 80ms;
+}
+
+.button:hover {
+  background: #e44d2b;
+}
+
+.button:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 var(--accent-dark);
+}
+
+.button:focus-visible {
+  outline: 3px solid var(--wood-dark);
+  outline-offset: 3px;
+}
+
+@keyframes flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes nuke-flash {
+  0% {
+    opacity: 0;
+  }
+  4% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -160%) scale(1.15);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

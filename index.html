@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chicken Hunt</title>
+  </head>
+  <body>
+    <canvas id="game" aria-label="Game view: a countryside with flying chickens"></canvas>
+
+    <div id="hud" class="hud" hidden>
+      <div class="hud-box hud-score">
+        <span class="hud-label">Score</span>
+        <span id="score" class="hud-value">0</span>
+      </div>
+      <div class="hud-box hud-time">
+        <span class="hud-label">Time</span>
+        <span id="time" class="hud-value">90</span>
+      </div>
+      <div class="hud-ammo">
+        <div id="ammo" class="ammo"></div>
+        <div id="ammo-count" class="ammo-count" hidden></div>
+        <div id="ammo-bar" class="ammo-bar" hidden></div>
+        <div id="reload-hint" class="reload-hint"></div>
+      </div>
+      <div id="weapons" class="weapons"></div>
+    </div>
+
+    <div id="crosshair" class="crosshair" aria-hidden="true"></div>
+    <div id="flash" class="flash" aria-hidden="true"></div>
+    <div id="nuke-flash" class="nuke-flash" aria-hidden="true"></div>
+    <div id="popups" class="popups" aria-hidden="true"></div>
+
+    <section id="start-screen" class="screen" aria-labelledby="start-title">
+      <div class="panel">
+        <h1 id="start-title">Chicken Hunt</h1>
+        <p>Shoot as many chickens as you can in 90 seconds.</p>
+        <ul class="rules">
+          <li><strong>Left click</strong> to shoot — hold it with the MG 42</li>
+          <li><strong>Right click</strong> or <strong>Space</strong> to reload</li>
+          <li><strong>1</strong>–<strong>5</strong> or <strong>mouse wheel</strong> to switch weapons</li>
+          <li>Move the mouse to the screen edge to look around</li>
+          <li>Far chickens <strong>25</strong> · middle <strong>10</strong> · near <strong>5</strong> points — fast ones double</li>
+        </ul>
+        <label class="setting" for="bird-count-start">
+          Chickens in the air: <strong id="bird-count-start-value">12</strong>
+          <input id="bird-count-start" type="range" step="1" />
+        </label>
+        <button id="start-button" class="button" type="button">Start hunting</button>
+        <p class="best">Best: <span id="start-best">0</span></p>
+      </div>
+    </section>
+
+    <section id="end-screen" class="screen" aria-labelledby="end-title" aria-live="polite" hidden>
+      <div class="panel">
+        <h2 id="end-title">Time's up!</h2>
+        <p class="final"><span id="final-score">0</span> points</p>
+        <p id="new-best" class="new-best" hidden>New high score!</p>
+        <p class="best">Best: <span id="end-best">0</span></p>
+        <label class="setting" for="bird-count-end">
+          Chickens in the air: <strong id="bird-count-end-value">12</strong>
+          <input id="bird-count-end" type="range" step="1" />
+        </label>
+        <button id="restart-button" class="button" type="button">Play again</button>
+      </div>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
