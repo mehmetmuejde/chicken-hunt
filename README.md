@@ -83,14 +83,14 @@ Technical choices worth knowing:
 
 ## Development
 
-Requires Node.js 22 or newer.
+Requires Node.js 22 or newer and [pnpm](https://pnpm.io) (the version is pinned in `package.json`).
 
 ```sh
-npm install
-npm run dev        # dev server on http://localhost:5173
-npm run typecheck  # TypeScript checks
-npm run build      # type check + production build into dist/
-npm run preview    # serve the production build
+pnpm install
+pnpm dev        # dev server on http://localhost:5173
+pnpm typecheck  # TypeScript checks
+pnpm build      # type check + production build into dist/
+pnpm preview    # serve the production build
 ```
 
 ## 3D models
